@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 structopt = "0.3.26"
 cli-table = "0.4.7"
+thiserror = "1.0.32"
