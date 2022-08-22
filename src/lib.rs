@@ -3,9 +3,11 @@ use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::Path;
 use structopt::StructOpt;
 use cli_table::{print_stdout, Cell, CellStruct, Style, Table};
+use crate::errors::ProgramError;
 
 mod tests;
 mod helpers;
+mod errors;
 pub mod config;
 
 #[derive(StructOpt, Debug)]
@@ -58,7 +60,7 @@ enum Opt {
     },
 }
 
-fn display_table<S: AsRef<str>, T: AsRef<str>>(title: &Vec<S>, body: &[Vec<T>]) {
+fn display_table<S: AsRef<str>, T: AsRef<str>>(title: &Vec<S>, body: &[Vec<T>]) -> Result<(), ProgramError> {
     let processed_title: Vec<CellStruct> = title
         .iter()
         .map(|entry| entry.as_ref().cell().bold(true))
@@ -66,36 +68,39 @@ fn display_table<S: AsRef<str>, T: AsRef<str>>(title: &Vec<S>, body: &[Vec<T>]) 
     let processed_body: Vec<Vec<CellStruct>> = helpers::map_data_to_cells(body);
     let table = processed_body.table().title(processed_title).bold(true);
     if let Err(_e) = print_stdout(table) {
-        println!("Encountered error while trying to display table");
+        return Err(ProgramError::PrintTableError);
     }
+    Ok(())
 }
 
-fn append_entry_to_data<S: AsRef<str>, T: AsRef<str>>(entry: (S, S), data: &[Vec<T>], data_path: &str) {
+fn append_entry_to_data<S: AsRef<str>, T: AsRef<str>>(entry: (S, S), data: &[Vec<T>], data_path: &str) -> Result<(), ProgramError> {
     let name = entry.0.as_ref();
     let email = entry.1.as_ref();
     let id = match &data.iter().last().unwrap()[0].as_ref().parse::<i32>() {
         Ok(idx) => Ok(idx + 1),
-        Err(e) => {
-            println!("Error getting the id of data: {}", e);
-            Err(())
+        Err(_) => {
+            return Err(ProgramError::CustomError { val: "Couldn't parse id".to_string() });
         }
     };
-    if let Err(_) = id {
-        return;
+    if let Err(e) = id {
+        return Err(e);
     }
-    println!("Adding id: {}, name: {}, and email {} to data...", id.unwrap(), name, email);
+    println!("Adding id: {}, name: {}, and email {} to data...", id.as_ref().unwrap(), name, email);
     let mut file = OpenOptions::new()
         .write(true)
         .append(true)
         .open(data_path)
         .unwrap();
-    let line = format!("{},{},{}", id.unwrap(), name, email);
-    if let Err(e) = writeln!(file, "{}", line) {
-        eprintln!("Couldn't write to file: {}", e);
+    let line = format!("{},{},{}", id.as_ref().unwrap(), name, email);
+    if let Err(_) = writeln!(file, "{}", line) {
+        return Err(ProgramError::WriteError);
     }
+    Ok(())
 }
 
-fn edit<S: AsRef<str>, T: AsRef<str>>(data: &[(usize, Vec<S>)], id: T, mut name: Option<T>, mut email: Option<T>, data_path: &str, temp_path: &str) {
+fn edit<S: AsRef<str>, T: AsRef<str>>
+(data: &[(usize, Vec<S>)], id: T, mut name: Option<T>, mut email: Option<T>, data_path: &str, temp_path: &str)
+ -> Result<(), ProgramError> {
     match data.iter().find(|line| line.1[0].as_ref().eq(id.as_ref())) {
         Some((idx, _)) => {
             let file = File::open(data_path);
@@ -118,8 +123,7 @@ fn edit<S: AsRef<str>, T: AsRef<str>>(data: &[(usize, Vec<S>)], id: T, mut name:
                             let line = line.as_ref().unwrap();
                             if index != *idx {
                                 if let Err(_) = writeln!(writer, "{}", line) {
-                                    println!("Some error occurred while trying to access data.");
-                                    return;
+                                    return Err(ProgramError::DataAccessError);
                                 }
                             } else {
                                 let name: String = match name.take() {
@@ -145,24 +149,24 @@ fn edit<S: AsRef<str>, T: AsRef<str>>(data: &[(usize, Vec<S>)], id: T, mut name:
                                     }
                                 };
                                 if let Err(_) = writeln!(writer, "{}", format!("{},{},{}", id.as_ref(), name, email)) {
-                                    println!("Some error occurred while trying to access data.");
-                                    return;
+                                    return Err(ProgramError::DataAccessError);
                                 }
                             }
                         }
                     }
                     if let Err(_) = fs::rename(temp_path, data_path) {
-                        println!("Some error occurred while trying to access data.");
+                        return Err(ProgramError::DataAccessError);
                     }
                 }
-                Err(_) => println!("Some error occurred while trying to access data."),
+                Err(_) => return Err(ProgramError::DataAccessError),
             }
         }
-        None => println!("Couldn't find entry with id {}", id.as_ref())
+        None => return Err(ProgramError::EntryNotFoundError),
     }
+    Ok(())
 }
 
-fn remove<S: AsRef<str>, T: AsRef<str>>(data: &[(usize, Vec<S>)], id: T, data_path: &str, temp_path: &str) {
+fn remove<S: AsRef<str>, T: AsRef<str>>(data: &[(usize, Vec<S>)], id: T, data_path: &str, temp_path: &str) -> Result<(), ProgramError> {
     match data.iter().find(|line| line.1[0].as_ref().eq(id.as_ref())) {
         Some((idx, _)) => {
             let file = File::open(data_path);
@@ -185,24 +189,24 @@ fn remove<S: AsRef<str>, T: AsRef<str>>(data: &[(usize, Vec<S>)], id: T, data_pa
                             let line = line.as_ref().unwrap();
                             if index != *idx {
                                 if let Err(_) = writeln!(writer, "{}", line) {
-                                    println!("Some error occurred while trying to access data.");
-                                    return;
+                                    return Err(ProgramError::DataAccessError);
                                 }
                             }
                         }
                     }
                     if let Err(_) = fs::rename(temp_path, data_path) {
-                        println!("Some error occurred while trying to access data.");
+                        return Err(ProgramError::DataAccessError);
                     }
                 }
-                Err(_) => println!("Some error occurred while trying to access data."),
+                Err(_) => return Err(ProgramError::DataAccessError)
             }
         }
-        None => println!("Couldn't find entry with id {}", id.as_ref())
+        None => return Err(ProgramError::EntryNotFoundError)
     }
+    Ok(())
 }
 
-fn find_one<S: AsRef<str>, T: AsRef<str>>(data: &[Vec<S>], col_idx: usize, query: T) {
+fn find_one<S: AsRef<str>, T: AsRef<str>>(data: &[Vec<S>], col_idx: usize, query: T) -> Result<(), ProgramError> {
     let title = &data[0];
     match data.iter()
         .find(|line| line[col_idx].as_ref().eq(query.as_ref()))
@@ -211,11 +215,14 @@ fn find_one<S: AsRef<str>, T: AsRef<str>>(data: &[Vec<S>], col_idx: usize, query
         Some(col) => {
             display_table(&title, &[col])
         }
-        None => println!("Couldn't find any entry!"),
+        None => {
+            println!("Couldn't find any entry!");
+            Err(ProgramError::EntryNotFoundError)
+        }
     }
 }
 
-fn find_many<S: AsRef<str>, T: AsRef<str>>(data: &[Vec<S>], col_idx: usize, query: T, contains: Option<bool>) {
+fn find_many<S: AsRef<str>, T: AsRef<str>>(data: &[Vec<S>], col_idx: usize, query: T, contains: Option<bool>) -> Result<(), ProgramError> {
     let title = &data[0];
     let data: Vec<Vec<String>> = data.iter()
         .filter(|line| {
@@ -228,41 +235,65 @@ fn find_many<S: AsRef<str>, T: AsRef<str>>(data: &[Vec<S>], col_idx: usize, quer
         .collect();
     if let 0 = data.len() {
         println!("Couldn't find any entry!");
-        return;
+        return Err(ProgramError::EntryNotFoundError);
     }
-    display_table(&title, &data[..]);
+    display_table(&title, &data[..])
+}
+
+fn read_data(data_path: &str, total_num_cols: usize) -> Result<Vec<(usize, Vec<String>)>, ProgramError> {
+    match helpers::read_lines(data_path) {
+        Ok(lines) => {
+            Ok(helpers::map_lines_to_data(lines, total_num_cols))
+        }
+        Err(_) => {
+            Err(ProgramError::DataAccessError)
+        }
+    }
 }
 
 pub fn run(config: config::Config) {
     let opt = Opt::from_args();
-    let data: Option<Vec<(usize, Vec<String>)>> = match helpers::read_lines(config.data_path) {
-        Ok(lines) => {
-            Some(helpers::map_lines_to_data(lines, config.total_num_cols))
-        }
-        Err(_) => {
-            println!("Some error occurred while trying to access data.");
-            None
-        }
-    };
+    let data_res = read_data(&config.data_path, config.total_num_cols);
+    if let Err(e) = data_res {
+        println!("{:?}", e);
+        return;
+    }
+    let data = data_res.unwrap();
     match opt {
-        Opt::View => if let Some(data) = data {
+        Opt::View => {
             let data: Vec<Vec<String>> = data.iter().map(|(_, line)| line.clone()).collect();
-            display_table(&data[0], &data[1..]);
-        }
-        Opt::Add { name, email } => if let Some(data) = data {
-            let data: Vec<Vec<String>> = data.iter().map(|(_, line)| line.clone()).collect();
-            append_entry_to_data((name, email), &data[1..], config.data_path);
-        }
-        Opt::Search { sub } => if let Some(data) = data {
-            let data: Vec<Vec<String>> = data.iter().map(|(_, line)| line.clone()).collect();
-            match sub {
-                SearchCommand::Id { id } => find_one(&data[..], config.id_idx, id.to_string()),
-                SearchCommand::Name { name } => find_many(&data[..], config.name_idx, name, Some(true)),
-                SearchCommand::Email { email } => find_many(&data[..], config.email_idx, email, Some(true)),
+            if let Err(e) = display_table(&data[0], &data[1..]) {
+                println!("{:?}", e);
             }
         }
-        Opt::Remove { id } => if let Some(data) = data {
-            remove(&data[..], id.to_string(), config.data_path, config.temp_path);
+        Opt::Add { name, email } => {
+            let data: Vec<Vec<String>> = data.iter().map(|(_, line)| line.clone()).collect();
+            if let Err(e) = append_entry_to_data((name, email), &data[1..], config.data_path) {
+                println!("{:?}", e);
+            }
+        }
+        Opt::Search { sub } => {
+            let data: Vec<Vec<String>> = data.iter().map(|(_, line)| line.clone()).collect();
+            match sub {
+                SearchCommand::Id { id } => {
+                    if let Err(e) = find_one(&data[..], config.id_idx, id.to_string()) {
+                        println!("{:?}", e);
+                    }
+                }
+                SearchCommand::Name { name } => {
+                    if let Err(e) = find_many(&data[..], config.name_idx, name, Some(true)) {
+                        println!("{:?}", e);
+                    }
+                }
+                SearchCommand::Email { email } => {
+                    if let Err(e) = find_many(&data[..], config.email_idx, email, Some(true)) {
+                        println!("{:?}", e);
+                    }
+                }
+            }
+        }
+        Opt::Remove { id } => if let Err(e) = remove(&data[..], id.to_string(), config.data_path, config.temp_path) {
+            println!("{:?}", e);
         }
         Opt::Edit { id, sub } => {
             let mut name_opt: Option<String> = None;
@@ -275,8 +306,8 @@ pub fn run(config: config::Config) {
                     email_opt = Some(email);
                 }
             }
-            if let Some(data) = data {
-                edit(&data[..], id.to_string(), name_opt, email_opt, config.data_path, config.temp_path);
+            if let Err(e) = edit(&data[..], id.to_string(), name_opt, email_opt, config.data_path, config.temp_path) {
+                println!("{:?}", e);
             }
         }
     }
