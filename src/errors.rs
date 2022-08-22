@@ -17,3 +17,16 @@ pub enum ProgramError {
     #[error("Custom Error: {val:?}")]
     CustomError { val: String },
 }
+
+impl PartialEq for ProgramError {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (ProgramError::PrintTableError, ProgramError::PrintTableError) => true,
+            (ProgramError::EntryNotFoundError, ProgramError::EntryNotFoundError) => true,
+            (ProgramError::DataAccessError, ProgramError::DataAccessError) => true,
+            (ProgramError::WriteError, ProgramError::WriteError) => true,
+            (ProgramError::CustomError { val: ref v1 }, ProgramError::CustomError { val: ref v2 }) => v1 == v2,
+            _ => false,
+        }
+    }
+}

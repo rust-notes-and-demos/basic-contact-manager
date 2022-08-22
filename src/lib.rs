@@ -79,23 +79,27 @@ fn append_entry_to_data<S: AsRef<str>, T: AsRef<str>>(entry: (S, S), data: &[Vec
     let id = match &data.iter().last().unwrap()[0].as_ref().parse::<i32>() {
         Ok(idx) => Ok(idx + 1),
         Err(_) => {
-            return Err(ProgramError::CustomError { val: "Couldn't parse id".to_string() });
+            return Err(ProgramError::CustomError { val: "couldn't parse id".to_string() });
         }
     };
     if let Err(e) = id {
         return Err(e);
     }
     println!("Adding id: {}, name: {}, and email {} to data...", id.as_ref().unwrap(), name, email);
-    let mut file = OpenOptions::new()
+    match OpenOptions::new()
         .write(true)
         .append(true)
-        .open(data_path)
-        .unwrap();
-    let line = format!("{},{},{}", id.as_ref().unwrap(), name, email);
-    if let Err(_) = writeln!(file, "{}", line) {
-        return Err(ProgramError::WriteError);
+        .open(data_path) {
+        Ok(mut file) => {
+            let line = format!("{},{},{}", id.as_ref().unwrap(), name, email);
+            if let Err(_) = writeln!(file, "{}", line) {
+                return Err(ProgramError::WriteError);
+            }
+            Ok(())
+        },
+        Err(_) => Err(ProgramError::DataAccessError),
     }
-    Ok(())
+
 }
 
 fn edit<S: AsRef<str>, T: AsRef<str>>
